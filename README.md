@@ -1,4 +1,4 @@
-# Otimização de Processos: O Problema da Mistura (Blending Problem) e Variações
+# Otimização de Processos: O Problema da Mistura e Variações
 
 Repositório dedicado ao estudo, especificação formal, modelagem matemática e implementação computacional do **Problema da Mistura** e suas extensões avançadas em Pesquisa Operacional e Engenharia de Processos.
 
@@ -10,7 +10,7 @@ Trabalho desenvolvido para a disciplina de **Otimização (COS360/COM361 - PESC/
 
 - **`notebooks/`**: Contém o Jupyter Notebook principal com a modelagem detalhada e a resolução computacional.
 - **`docs/`**: Documentação complementar, especificação formal e taxonomia.
-- **`src/`**: Módulos auxiliares em Python com as formulações (LP, MIP, NLP).
+- **`src/`**: Módulos auxiliares em Python com as formulações.
 
 ---
 
@@ -18,7 +18,7 @@ Trabalho desenvolvido para a disciplina de **Otimização (COS360/COM361 - PESC/
 
 O projeto pretende abordar o problema base e suas principais evoluções estruturais:
 
-1. [ ] **Problema Base (Standard LP Blending):** Minimização de custos de matérias-primas atendendo a demandas e especificações de qualidade.
+1. [ ] **Problema Base:** Minimização de custos de matérias-primas atendendo a demandas e especificações de qualidade.
 2. [ ] **Redes de Fluxo Generalizado (GNF):** Tratamento de perdas e ganhos estequiométricos em grafos de conversão.
 3. [ ] **Custos Fixos e Lotes Mínimos (MIP):** Inclusão de variáveis binárias para ativação de rotas e custos de *setup*.
 4. [ ] **Problema do Pooling (NLP):** Abordagem de misturas multiestágio com não-linearidades bilineares e perda de convexidade.
