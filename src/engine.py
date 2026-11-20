@@ -19,6 +19,16 @@ class Solution:
     inventory_used: np.ndarray
 
 
+@dataclass(frozen=True)
+class LinearProgram:
+    """Solver-independent representation of a linear minimization problem."""
+
+    objective: np.ndarray
+    inequalities: np.ndarray
+    limits: np.ndarray
+    bounds: tuple[tuple[float, float | None], ...]
+
+
 class MakeOrBuyModel:
     """Build and solve a make-or-buy LP by adding items and recipe arcs."""
 
@@ -102,14 +112,12 @@ class MakeOrBuyModel:
 
     def solve(self, method: str = "highs") -> Solution:
         """Solve the current model and return its optimal vectors."""
-        if not self.item_index:
-            raise ValueError("add at least one item before solving")
-
+        problem = self.export_linear_program()
         result = linprog(
-            self._objective,
-            A_ub=self._restrictions,
-            b_ub=np.asarray(self._restriction_limits),
-            bounds=self._bounds,
+            problem.objective,
+            A_ub=problem.inequalities,
+            b_ub=problem.limits,
+            bounds=problem.bounds,
             method=method,
         )
         if not result.success:
@@ -121,6 +129,17 @@ class MakeOrBuyModel:
             purchases=quantities[:, 0].copy(),
             production=quantities[:, 1].copy(),
             inventory_used=quantities[:, 2].copy(),
+        )
+
+    def export_linear_program(self) -> LinearProgram:
+        """Return copies of the LP data for use by different solver libraries."""
+        if not self.item_index:
+            raise ValueError("add at least one item before solving")
+        return LinearProgram(
+            objective=self._objective.copy(),
+            inequalities=self._restrictions.copy(),
+            limits=np.asarray(self._restriction_limits, dtype=float),
+            bounds=tuple(self._bounds),
         )
 
     def _add_restriction(

@@ -13,9 +13,14 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Sequence
 
-from src.engine import MakeOrBuyModel
+if __package__:
+    from .engine import MakeOrBuyModel
+    from .solver_backends import SCIPY_METHODS, available_solvers, solve as solve_lp
+else:
+    from engine import MakeOrBuyModel
+    from solver_backends import SCIPY_METHODS, available_solvers, solve as solve_lp
 
-METHODS = ("highs", "highs-ds", "highs-ipm")
+METHODS = SCIPY_METHODS
 DATASETS = ("chain", "sparse", "dense")
 ROOT = Path(__file__).resolve().parents[1]
 FIELDS = (
@@ -23,8 +28,13 @@ FIELDS = (
     "items",
     "arcs",
     "method",
+    "backend",
+    "solver",
+    "status",
+    "error",
     "repeat",
     "build_seconds",
+    "solver_model_seconds",
     "solve_seconds",
     "total_seconds",
     "peak_rss_mib",
@@ -48,34 +58,50 @@ class Benchmark:
         self,
         datasets: Sequence[str] = DATASETS,
         sizes: Sequence[int] = (10, 25, 50),
-        methods: Sequence[str] = METHODS,
+        methods: Sequence[str] | None = None,
         repeats: int = 3,
         output: str | Path | None = None,
+        solvers: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Benchmark synthetic graph datasets and write the results to CSV."""
-        self._validate_options(datasets, sizes, methods, repeats)
+        """Benchmark synthetic instances with selected solver IDs.
+
+        ``methods`` is a compatibility shortcut for selecting SciPy methods.
+        Use ``solvers`` for IDs returned by :func:`available_solvers`.
+        """
+        selected_solvers = self._select_solvers(methods, solvers)
+        self._validate_options(datasets, sizes, selected_solvers, repeats)
         if not datasets or not sizes:
             raise ValueError("datasets and sizes must not be empty")
-        total = len(datasets) * len(sizes) * len(methods) * repeats
+        jobs = [
+            (
+                dataset,
+                size,
+                solver_id,
+                repeat,
+                self.seed + size * 1009 + repeat,
+            )
+            for dataset in datasets
+            for size in sizes
+            for solver_id in selected_solvers
+            for repeat in range(1, repeats + 1)
+        ]
+        random.Random(self.seed).shuffle(jobs)
+        total = len(jobs)
         rows = []
-        completed = 0
-        for dataset in datasets:
-            for size in sizes:
-                for method in methods:
-                    for repeat in range(1, repeats + 1):
-                        completed += 1
-                        seed = self.seed + size * 1009 + repeat
-                        rows.append(
-                            self._run_with_progress(
-                                completed,
-                                total,
-                                dataset,
-                                size,
-                                method,
-                                seed,
-                                repeat,
-                            )
-                        )
+        for completed, (dataset, size, solver_id, repeat, seed) in enumerate(
+            jobs, start=1
+        ):
+            rows.append(
+                self._run_with_progress(
+                    completed,
+                    total,
+                    dataset,
+                    size,
+                    solver_id,
+                    seed,
+                    repeat,
+                )
+            )
         self._validate_objectives(rows)
         self._write_csv(rows, output)
         return rows
@@ -84,11 +110,12 @@ class Benchmark:
         self,
         costs: Costs,
         recipes: Recipes,
-        methods: Sequence[str] = METHODS,
+        methods: Sequence[str] | None = None,
         repeats: int = 10,
         output: str | Path | None = None,
+        solvers: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Benchmark a custom instance across methods and isolated processes.
+        """Benchmark a custom instance across solver adapters.
 
         ``costs`` contains (purchase_cost, production_cost) per item.
         ``recipes`` contains (ingredient_index, product_index, amount).
@@ -96,32 +123,49 @@ class Benchmark:
         """
         if not costs:
             raise ValueError("costs must contain at least one item")
-        self._validate_options((), (), methods, repeats)
+        selected_solvers = self._select_solvers(methods, solvers)
+        self._validate_options((), (), selected_solvers, repeats)
         instance = {
             "costs": list(costs),
             "arcs": list(recipes),
         }
-        total = len(methods) * repeats
+        jobs = [
+            (solver_id, repeat)
+            for solver_id in selected_solvers
+            for repeat in range(1, repeats + 1)
+        ]
+        random.Random(self.seed).shuffle(jobs)
+        total = len(jobs)
         rows = []
-        completed = 0
-        for method in methods:
-            for repeat in range(1, repeats + 1):
-                completed += 1
-                rows.append(
-                    self._run_with_progress(
-                        completed,
-                        total,
-                        "custom",
-                        len(costs),
-                        method,
-                        self.seed + repeat,
-                        repeat,
-                        instance=instance,
-                    )
+        for completed, (solver_id, repeat) in enumerate(jobs, start=1):
+            rows.append(
+                self._run_with_progress(
+                    completed,
+                    total,
+                    "custom",
+                    len(costs),
+                    solver_id,
+                    self.seed + repeat,
+                    repeat,
+                    instance=instance,
                 )
+            )
         self._validate_objectives(rows)
         self._write_csv(rows, output)
         return rows
+
+    @staticmethod
+    def _select_solvers(
+        methods: Sequence[str] | None, solvers: Sequence[str] | None
+    ) -> tuple[str, ...]:
+        if methods is not None and solvers is not None:
+            raise ValueError("use either methods or solvers, not both")
+        if methods is not None:
+            return tuple(f"scipy/{method}" for method in methods)
+        selected = tuple(solvers) if solvers is not None else tuple(available_solvers())
+        if not selected:
+            raise ValueError("no solvers selected or available")
+        return selected
 
     def _run_with_progress(
         self,
@@ -129,40 +173,39 @@ class Benchmark:
         total: int,
         dataset: str,
         size: int,
-        method: str,
+        solver_id: str,
         seed: int,
         repeat: int,
         instance: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        label = f"[{completed}/{total}] {dataset}, n={size}, {method}, rep={repeat}"
+        label = f"[{completed}/{total}] {dataset}, n={size}, {solver_id}, rep={repeat}"
         print(f"{label} ...", end="\r", flush=True)
-        try:
-            row = self._run_isolated(
-                dataset, size, method, seed, repeat, instance=instance
-            )
-        except RuntimeError:
-            print(f"{label} falhou", flush=True)
-            raise
-        print(
-            f"{label} {row['total_seconds']:.3f}s, "
-            f"RSS {row['peak_rss_mib']:.1f} MiB",
-            flush=True,
+        row = self._run_isolated(
+            dataset, size, solver_id, seed, repeat, instance=instance
         )
+        if row["status"] == "optimal":
+            print(
+                f"{label} {row['total_seconds']:.3f}s, "
+                f"RSS {row['peak_rss_mib']:.1f} MiB",
+                flush=True,
+            )
+        else:
+            print(f"{label} {row['status']}: {row['error']}", flush=True)
         return row
 
     @staticmethod
     def _validate_options(
         datasets: Sequence[str],
         sizes: Sequence[int],
-        methods: Sequence[str],
+        solvers: Sequence[str],
         repeats: int,
     ) -> None:
         if datasets and any(dataset not in DATASETS for dataset in datasets):
             raise ValueError(f"datasets must be selected from {DATASETS}")
         if sizes and any(size < 1 for size in sizes):
             raise ValueError("sizes must be positive integers")
-        if not methods or any(not method for method in methods):
-            raise ValueError("methods must contain at least one method name")
+        if not solvers or any(not solver for solver in solvers):
+            raise ValueError("solvers must contain at least one solver ID")
         if repeats < 1:
             raise ValueError("repeats must be a positive integer")
 
@@ -211,7 +254,7 @@ class Benchmark:
         cls,
         costs: Costs,
         arcs: Recipes,
-        method: str,
+        solver_id: str,
         dataset: str,
         repeat: int,
     ) -> dict[str, Any]:
@@ -227,30 +270,51 @@ class Benchmark:
             )
         for ingredient, product, amount in arcs:
             model.add_recipe(ingredient, product, amount)
+        problem = model.export_linear_program()
         built = perf_counter()
 
-        solution = model.solve(method=method)
+        solve_started = perf_counter()
+        try:
+            result = solve_lp(problem, solver_id)
+        except Exception as error:
+            status = "error"
+            error_message = f"{type(error).__name__}: {error}"
+            solver_model_seconds = 0.0
+            solve_seconds = perf_counter() - solve_started
+            objective = None
+        else:
+            status = "optimal"
+            error_message = ""
+            solver_model_seconds = result.model_seconds
+            solve_seconds = result.solve_seconds
+            objective = result.objective
         finished = perf_counter()
         peak = cls._peak_rss_mib()
+        backend, solver_name = solver_id.split("/", maxsplit=1)
         return {
             "dataset": dataset,
             "items": len(costs),
             "arcs": len(arcs),
-            "method": method,
+            "method": solver_id,
+            "backend": backend,
+            "solver": solver_name,
+            "status": status,
+            "error": error_message,
             "repeat": repeat,
             "build_seconds": built - started,
-            "solve_seconds": finished - built,
+            "solver_model_seconds": solver_model_seconds,
+            "solve_seconds": solve_seconds,
             "total_seconds": finished - started,
             "peak_rss_mib": peak,
             "additional_peak_rss_mib": max(0.0, peak - baseline_peak),
-            "objective": solution.total_cost,
+            "objective": objective,
         }
 
     def _run_isolated(
         self,
         dataset: str,
         size: int,
-        method: str,
+        solver_id: str,
         seed: int,
         repeat: int,
         instance: dict[str, Any] | None = None,
@@ -264,8 +328,8 @@ class Benchmark:
             dataset,
             "--size",
             str(size),
-            "--method",
-            method,
+            "--solver-id",
+            solver_id,
             "--seed",
             str(seed),
             "--repeat",
@@ -281,7 +345,7 @@ class Benchmark:
         )
         if result.returncode:
             raise RuntimeError(
-                f"Benchmark failed for {dataset}/{size}/{method} "
+                f"Benchmark failed for {dataset}/{size}/{solver_id} "
                 f"(repeat {repeat}):\n{result.stderr.strip()}"
             )
         return json.loads(result.stdout)
@@ -290,6 +354,8 @@ class Benchmark:
     def _validate_objectives(rows: Sequence[dict[str, Any]]) -> None:
         objectives: dict[tuple[str, int, int], list[float]] = {}
         for row in rows:
+            if row["status"] != "optimal":
+                continue
             key = (row["dataset"], row["items"], row["repeat"])
             objectives.setdefault(key, []).append(row["objective"])
         for key, values in objectives.items():
@@ -323,7 +389,7 @@ def _worker(args: argparse.Namespace) -> None:
             args.dataset, args.size, args.seed
         )
     row = Benchmark._measure_instance(
-        costs, arcs, args.method, args.dataset, args.repeat
+        costs, arcs, args.solver_id, args.dataset, args.repeat
     )
     print(json.dumps(row))
 
@@ -331,22 +397,26 @@ def _worker(args: argparse.Namespace) -> None:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--list-solvers",
+        action="store_true",
+        help="list solver IDs available in the current environment",
+    )
+    parser.add_argument(
         "--datasets",
         nargs="+",
         choices=DATASETS,
         default=list(DATASETS),
     )
     parser.add_argument("--sizes", nargs="+", type=int, default=[10, 50, 100, 500, 1000])
-    parser.add_argument(
-        "--methods", nargs="+", choices=METHODS, default=list(METHODS)
-    )
+    parser.add_argument("--methods", nargs="+", choices=METHODS)
+    parser.add_argument("--solvers", nargs="+")
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--seed", type=int, default=2012132752949)
     parser.add_argument("--output", default="results/benchmark.csv")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--dataset", help=argparse.SUPPRESS)
     parser.add_argument("--size", type=int, help=argparse.SUPPRESS)
-    parser.add_argument("--method", help=argparse.SUPPRESS)
+    parser.add_argument("--solver-id", help=argparse.SUPPRESS)
     parser.add_argument("--repeat", type=int, help=argparse.SUPPRESS)
     return parser.parse_args()
 
@@ -356,11 +426,15 @@ def main() -> None:
     if args.worker:
         _worker(args)
         return
+    if args.list_solvers:
+        print("\n".join(available_solvers()))
+        return
     Benchmark(output=args.output, seed=args.seed).run(
         datasets=args.datasets,
         sizes=args.sizes,
         methods=args.methods,
         repeats=args.repeats,
+        solvers=args.solvers,
     )
 
 
