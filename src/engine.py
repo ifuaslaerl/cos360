@@ -100,7 +100,7 @@ class MakeOrBuyModel:
             )
         return int(item)
 
-    def solve(self) -> Solution:
+    def solve(self, method: str = "highs") -> Solution:
         """Solve the current model and return its optimal vectors."""
         if not self.item_index:
             raise ValueError("add at least one item before solving")
@@ -110,7 +110,7 @@ class MakeOrBuyModel:
             A_ub=self._restrictions,
             b_ub=np.asarray(self._restriction_limits),
             bounds=self._bounds,
-            method="highs",
+            method=method,
         )
         if not result.success:
             raise RuntimeError(f"Optimization failed: {result.message}")
