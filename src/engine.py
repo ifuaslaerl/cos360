@@ -38,7 +38,7 @@ class MakeOrBuyModel:
         self._restrictions = np.zeros((0, 0))
         self._restriction_limits: list[float] = []
         self._bounds: list[tuple[float, float | None]] = []
-        self._recipes: set[tuple[int, int]] = set()
+        self._recipes: dict[tuple[int, int], float] = {}
 
     def add_item(
         self,
@@ -84,6 +84,8 @@ class MakeOrBuyModel:
         ingredient_index = self._resolve_item_index(ingredient, "ingredient")
         product_index = self._resolve_item_index(product, "product")
         amount_value = self._positive(amount, "amount")
+        if ingredient_index == product_index:
+            raise ValueError("an item cannot be an ingredient of itself")
         arc = (ingredient_index, product_index)
         if arc in self._recipes:
             raise ValueError(
@@ -91,10 +93,40 @@ class MakeOrBuyModel:
                 "has already been added"
             )
 
-        self._recipes.add(arc)
+        self._recipes[arc] = amount_value
         self._add_restriction(
             ingredient_index, 3 * product_index + 1, amount_value
         )
+
+    def set_demand(self, item: str | int, demand: float) -> None:
+        """Replace the external demand of an item."""
+        index = self._resolve_item_index(item, "item")
+        self._restriction_limits[index] = -self._non_negative(demand, "demand")
+
+    @property
+    def item_names(self) -> list[str]:
+        """Item names ordered by index."""
+        return list(self.item_index)
+
+    @property
+    def recipes(self) -> dict[tuple[int, int], float]:
+        """Amount of ingredient needed per unit of product, by (ingredient, product)."""
+        return dict(self._recipes)
+
+    @property
+    def demands(self) -> np.ndarray:
+        """External demand of each item."""
+        return -np.asarray(self._restriction_limits)
+
+    @property
+    def purchase_costs(self) -> np.ndarray:
+        """Unit purchase cost of each item."""
+        return self._objective[0::3].copy()
+
+    @property
+    def production_costs(self) -> np.ndarray:
+        """Unit production cost of each item."""
+        return self._objective[1::3].copy()
 
     def _resolve_item_index(self, item: str | int, role: str) -> int:
         if isinstance(item, str):

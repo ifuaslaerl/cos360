@@ -1,47 +1,42 @@
-# Otimização de Processos: O Problema da Mistura e Variações
+# Otimização de Processos: Modelo Make-or-Buy Multiestágio
 
-Repositório dedicado ao estudo, especificação formal, modelagem matemática e implementação computacional do **Problema da Mistura** e suas extensões avançadas em Pesquisa Operacional e Engenharia de Processos.
+Repositório dedicado ao estudo, especificação formal, modelagem matemática e implementação computacional de um problema de **Programação Linear** em que se decide, para cada item de uma cadeia produtiva, quanto **usar do estoque**, **comprar** e **produzir** para atender a demanda ao menor custo.
 
 Trabalho desenvolvido para a disciplina de **Otimização (COS360/COM361 - PESC/COPPE/UFRJ)**.
-
 ---
-
 ## Estrutura do Repositório
-
-- **`notebooks/`**: Contém o Jupyter Notebook principal com a modelagem detalhada e a resolução computacional.
-- **`docs/`**: Documentação complementar, especificação formal e taxonomia.
-- **`src/`**: Módulos auxiliares em Python com as formulações.
-
+- **`Sintese.ipynb`**: Contém o Jupyter Notebook principal com a modelagem detalhada e a resolução computacional.
+- **`src/engine.py`**: classe `MakeOrBuyModel`, que monta e resolve o PL.
+- **`src/plots.py`**: gráficos do grafo e da função objetivo.
+- **`src/benchmark.py`, `src/solver_backends.py`, `src/plot_benchmark.py`, `src/analyze_benchmark.py`**: comparação de tempo e memória entre solvers (material complementar).
 ---
-
-## Conteúdo do Guia e Taxonomia
-
-O projeto pretende abordar o problema base e suas principais evoluções estruturais:
-
-1. [ ] **Problema Base:** Minimização de custos de matérias-primas atendendo a demandas e especificações de qualidade.
-2. [ ] **Redes de Fluxo Generalizado (GNF):** Tratamento de perdas e ganhos estequiométricos em grafos de conversão.
-3. [ ] **Custos Fixos e Lotes Mínimos (MIP):** Inclusão de variáveis binárias para ativação de rotas e custos de *setup*.
-4. [ ] **Problema do Pooling (NLP):** Abordagem de misturas multiestágio com não-linearidades bilineares e perda de convexidade.
-5. [ ] **Síntese de Processos (MINLP):** Otimização topológica de superestruturas industriais.
-
+## Exemplo de Uso
+```python
+from src.engine import MakeOrBuyModel
+model = MakeOrBuyModel()
+model.add_item("etileno", inventory=20, purchase_cost=3.0, production_cost=0.8)
+model.add_item("propileno", purchase_cost=4.0, production_cost=1.0)
+model.add_item("solvente", purchase_cost=9.0, production_cost=2.0)
+model.add_item("polimero", demand=100, purchase_cost=30.0, production_cost=3.0)
+model.add_recipe("etileno", "solvente", 0.6)
+model.add_recipe("propileno", "solvente", 0.5)
+model.add_recipe("solvente", "polimero", 0.7)
+model.add_recipe("etileno", "polimero", 0.4)
+print(model.solve().total_cost)  # 524.6
+```
 ---
-
 ## Como Executar
-
 1. Clone o repositório:
-   
    ```bash
-   git clone https://github.com/seu-usuario/blending-process-optimization.git
+   git clone <url-do-repositório>
+   cd cos360
    ```
-   
 2. Instale as dependências:
-    
     ```bash
     pip install -r requirements.txt
     ```
-
-3. Abra o Jupyter Notebook correspondente na pasta notebooks/.
-
+3. Abra o Jupyter Notebook correspondente.
+---
 ## Benchmark de tempo e memória
 
 O benchmark cria instâncias sintéticas com grafos em cadeia, esparsos e densos.
