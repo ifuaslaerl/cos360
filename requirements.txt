@@ -4,5 +4,4 @@ seaborn
 networkx
 numpy
 scipy
-pulp[cbc]<4
 ortools
