@@ -8,5 +8,5 @@ class DatasetSource(ABC):
     """Extracts raw dataset payloads for the ETL pipeline."""
 
     @abstractmethod
-    def load(self) -> dict[str, Any]:
+    def load(self) -> Any:
         """Return one raw JSON-compatible dataset payload."""
