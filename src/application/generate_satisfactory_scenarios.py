@@ -31,7 +31,6 @@ class ScenarioGeneratorRunner:
         )
         parser.add_argument("--orders", nargs="+", type=int, default=(10, 100, 1000))
         parser.add_argument("--cases-per-order", type=int, default=5)
-        parser.add_argument("--items-per-scenario", type=int, default=5)
         parser.add_argument("--seed", type=int, default=360)
         options = parser.parse_args(arguments)
 
@@ -46,11 +45,20 @@ class ScenarioGeneratorRunner:
                 [item.id for item in instance.items],
                 seed=options.seed + order,
             )
+            use_all_items = order >= 1000
+            item_count_range = None
+            if not use_all_items:
+                item_count_range = (
+                    order,
+                    min(order * 10 - 1, len(instance.items)),
+                )
             paths = generator.generate(
                 count=options.cases_per_order,
-                items_per_scenario=options.items_per_scenario,
+                items_per_scenario=None,
+                items_per_scenario_range=item_count_range,
                 demand_range=(order, order * 10 - 1),
                 inventory_range=(order, order * 10 - 1),
+                use_all_items=use_all_items,
             )
             for path in paths:
                 print(path)
