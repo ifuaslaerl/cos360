@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-from matplotlib.figure import Figure
 
 if TYPE_CHECKING:
     from src.engine import MakeOrBuyModel, Solution
@@ -21,9 +19,8 @@ VARIABLES = {"compra": 0, "produção": 1, "estoque": 2}
 def plot_graph(
     model: MakeOrBuyModel,
     solution: Solution | None = None,
-    output: str | Path | None = None,
     figsize: tuple[float, float] = (10.0, 6.0),
-) -> Figure:
+) -> None:
     """Draw the recipe graph with the optimal quantities in each node."""
     solution = solution or model.solve()
     graph = nx.DiGraph()
@@ -56,8 +53,7 @@ def plot_graph(
     colors = plt.get_cmap("tab10")
     palette = {c: colors(i) for i, c in enumerate(sorted(set(categories)))}
 
-    fig = Figure(figsize=figsize)
-    ax = fig.subplots()
+    _, ax = plt.subplots(figsize=figsize)
     nx.draw_networkx_nodes(
         graph, positions, ax=ax, node_size=4500,
         node_color=[palette[c] for c in categories],
@@ -79,23 +75,21 @@ def plot_graph(
         loc="upper left",
         bbox_to_anchor=(1.0, 1.0),
     )
-    return _save(fig, output)
+    plt.show()
 
 
 def plot_cost_breakdown(
     model: MakeOrBuyModel,
     solution: Solution | None = None,
-    output: str | Path | None = None,
     figsize: tuple[float, float] = (10.0, 5.0),
-) -> Figure:
+) -> None:
     """Stacked bars with the purchase and production cost of each item."""
     solution = solution or model.solve()
     purchase = solution.purchases * model.purchase_costs
     production = solution.production * model.production_costs
     positions = np.arange(len(model.item_names))
 
-    fig = Figure(figsize=figsize)
-    ax = fig.subplots()
+    _, ax = plt.subplots(figsize=figsize)
     ax.bar(positions, purchase, label="Compra")
     ax.bar(positions, production, bottom=purchase, label="Produção")
     ax.set_xticks(positions, model.item_names, rotation=45, ha="right")
@@ -103,33 +97,50 @@ def plot_cost_breakdown(
     ax.set_xlabel("Item")
     ax.set_ylabel("Custo")
     ax.legend()
-    return _save(fig, output)
+    plt.show()
+
+
+def plot_sensitivity(
+    model: MakeOrBuyModel,
+    parameter: str,
+    item: str | int,
+    values: Sequence[float],
+    figsize: tuple[float, float] = (8.0, 5.0),
+) -> None:
+    """Optimal cost as one parameter of one item varies."""
+    values = sorted(values)
+    variant = deepcopy(model)
+    setter = {
+        "demanda": variant.set_demand,
+        "estoque": variant.set_inventory,
+        "custo de compra": variant.set_purchase_cost,
+        "custo de produção": variant.set_production_cost,
+        "capacidade de compra": variant.set_purchase_capacity,
+        "capacidade de produção": variant.set_production_capacity,
+    }[parameter]
+    costs = []
+    for value in values:
+        setter(item, value)
+        costs.append(variant.solve().total_cost)
+    name = item if isinstance(item, str) else model.item_names[item]
+
+    _, ax = plt.subplots(figsize=figsize)
+    ax.plot(values, costs, marker="o", label="Custo ótimo")
+    ax.set_title(f"Custo ótimo em função de {parameter} de {name}")
+    ax.set_xlabel(parameter.capitalize())
+    ax.set_ylabel("Custo ótimo")
+    ax.legend()
+    plt.show()
 
 
 def plot_demand_sensitivity(
     model: MakeOrBuyModel,
     item: str | int,
     demands: Sequence[float],
-    output: str | Path | None = None,
     figsize: tuple[float, float] = (8.0, 5.0),
-) -> Figure:
-    """Optimal cost as a function of one item's demand (convex, piecewise linear)."""
-    demands = sorted(demands)
-    variant = deepcopy(model)
-    costs = []
-    for demand in demands:
-        variant.set_demand(item, demand)
-        costs.append(variant.solve().total_cost)
-    name = item if isinstance(item, str) else model.item_names[item]
-
-    fig = Figure(figsize=figsize)
-    ax = fig.subplots()
-    ax.plot(demands, costs, marker="o", label="Custo ótimo")
-    ax.set_title(f"Custo ótimo em função da demanda de {name}")
-    ax.set_xlabel("Demanda")
-    ax.set_ylabel("Custo ótimo")
-    ax.legend()
-    return _save(fig, output)
+) -> None:
+    """Optimal cost as a function of one item's demand."""
+    plot_sensitivity(model, "demanda", item, demands, figsize)
 
 
 def plot_feasible_region(
@@ -139,9 +150,8 @@ def plot_feasible_region(
     solution: Solution | None = None,
     limits: tuple[float, float] | None = None,
     resolution: int = 400,
-    output: str | Path | None = None,
     figsize: tuple[float, float] = (8.0, 6.0),
-) -> Figure:
+) -> None:
     """Plot a 2D slice of the feasible region with cost level curves and the optimum."""
     solution = solution or model.solve()
     lp = model.export_linear_program()
@@ -169,8 +179,7 @@ def plot_feasible_region(
             feasible &= grid <= upper + TOLERANCE
 
     cost = lp.objective[i] * X + lp.objective[j] * Y
-    fig = Figure(figsize=figsize)
-    ax = fig.subplots()
+    _, ax = plt.subplots(figsize=figsize)
     ax.contourf(X, Y, feasible, levels=[0.5, 1.5], colors=["#9ecae1"], alpha=0.6)
     levels = ax.contour(
         X, Y, np.where(feasible, cost, np.nan), levels=10, cmap="Oranges"
@@ -179,6 +188,9 @@ def plot_feasible_region(
     for row in np.flatnonzero(lp.inequalities[:, [i, j]].any(axis=1)):
         if (slack[row] < 0).any() and (slack[row] > 0).any():
             ax.contour(X, Y, slack[row], levels=[0], colors="k", linewidths=1)
+    for var, draw in ((i, ax.axvline), (j, ax.axhline)):
+        if lp.bounds[var][1] is not None:
+            draw(lp.bounds[var][1], color="k", linestyle="--", linewidth=1)
     ax.plot(optimum[i], optimum[j], "r*", markersize=16, label="Ótimo")
     ax.set_xlim(low, high)
     ax.set_ylim(low, high)
@@ -186,7 +198,7 @@ def plot_feasible_region(
     ax.set_ylabel(_variable_label(y_variable))
     ax.set_title("Região viável (azul), curvas de nível do custo e ótimo")
     ax.legend()
-    return _save(fig, output)
+    plt.show()
 
 
 def _variable_index(model: MakeOrBuyModel, variable: tuple[str, str]) -> int:
@@ -196,11 +208,3 @@ def _variable_index(model: MakeOrBuyModel, variable: tuple[str, str]) -> int:
 
 def _variable_label(variable: tuple[str, str]) -> str:
     return f"{variable[0]} de {variable[1]}"
-
-
-def _save(fig: Figure, output: str | Path | None) -> Figure:
-    if output is not None:
-        path = Path(output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(path, dpi=150, bbox_inches="tight")
-    return fig

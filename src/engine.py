@@ -9,6 +9,10 @@ import numpy as np
 from scipy.optimize import linprog
 
 
+class InfeasibleError(RuntimeError):
+    """Raised when the capacities leave no plan that meets the demand."""
+
+
 @dataclass(frozen=True)
 class Solution:
     """Optimal purchase, production, and inventory-use quantity vectors."""
@@ -48,8 +52,13 @@ class MakeOrBuyModel:
         *,
         purchase_cost: float,
         production_cost: float,
+        purchase_capacity: float | None = None,
+        production_capacity: float | None = None,
     ) -> None:
-        """Add an item and its demand, available stock, and unit costs."""
+        """Add an item with its demand, stock, unit costs, and optional capacities.
+
+        A capacity of ``None`` means unlimited.
+        """
         if not isinstance(name, str) or not name:
             raise ValueError("name must be a non-empty string")
         if name in self.item_index:
@@ -59,6 +68,8 @@ class MakeOrBuyModel:
         inventory_value = self._non_negative(inventory, "inventory")
         purchase_value = self._non_negative(purchase_cost, "purchase_cost")
         production_value = self._non_negative(production_cost, "production_cost")
+        purchase_limit = self._capacity(purchase_capacity, "purchase_capacity")
+        production_limit = self._capacity(production_capacity, "production_capacity")
 
         index = len(self.item_index)
         self.item_index[name] = index
@@ -66,7 +77,9 @@ class MakeOrBuyModel:
         self._objective = np.pad(self._objective, (0, 3))
         self._restrictions = np.pad(self._restrictions, ((0, 1), (0, 3)))
         self._restriction_limits.append(-demand_value)
-        self._bounds.extend([(0.0, None), (0.0, None), (0.0, inventory_value)])
+        self._bounds.extend(
+            [(0.0, purchase_limit), (0.0, production_limit), (0.0, inventory_value)]
+        )
 
         purchase_variable = 3 * index
         production_variable = purchase_variable + 1
@@ -103,6 +116,35 @@ class MakeOrBuyModel:
         index = self._resolve_item_index(item, "item")
         self._restriction_limits[index] = -self._non_negative(demand, "demand")
 
+    def set_inventory(self, item: str | int, inventory: float) -> None:
+        """Replace the available stock of an item."""
+        index = self._resolve_item_index(item, "item")
+        value = self._non_negative(inventory, "inventory")
+        self._bounds[3 * index + 2] = (0.0, value)
+
+    def set_purchase_cost(self, item: str | int, cost: float) -> None:
+        """Replace the unit purchase cost of an item."""
+        index = self._resolve_item_index(item, "item")
+        self._objective[3 * index] = self._non_negative(cost, "purchase_cost")
+
+    def set_production_cost(self, item: str | int, cost: float) -> None:
+        """Replace the unit production cost of an item."""
+        index = self._resolve_item_index(item, "item")
+        self._objective[3 * index + 1] = self._non_negative(cost, "production_cost")
+
+    def set_purchase_capacity(self, item: str | int, capacity: float | None) -> None:
+        """Replace the purchase capacity of an item (``None`` is unlimited)."""
+        index = self._resolve_item_index(item, "item")
+        self._bounds[3 * index] = (0.0, self._capacity(capacity, "purchase_capacity"))
+
+    def set_production_capacity(self, item: str | int, capacity: float | None) -> None:
+        """Replace the production capacity of an item (``None`` is unlimited)."""
+        index = self._resolve_item_index(item, "item")
+        self._bounds[3 * index + 1] = (
+            0.0,
+            self._capacity(capacity, "production_capacity"),
+        )
+
     @property
     def item_names(self) -> list[str]:
         """Item names ordered by index."""
@@ -128,6 +170,21 @@ class MakeOrBuyModel:
         """Unit production cost of each item."""
         return self._objective[1::3].copy()
 
+    @property
+    def inventories(self) -> np.ndarray:
+        """Initial stock of each item."""
+        return np.array([upper for _, upper in self._bounds[2::3]])
+
+    @property
+    def purchase_capacities(self) -> list[float | None]:
+        """Purchase capacity of each item (``None`` is unlimited)."""
+        return [upper for _, upper in self._bounds[0::3]]
+
+    @property
+    def production_capacities(self) -> list[float | None]:
+        """Production capacity of each item (``None`` is unlimited)."""
+        return [upper for _, upper in self._bounds[1::3]]
+
     def _resolve_item_index(self, item: str | int, role: str) -> int:
         if isinstance(item, str):
             try:
@@ -152,6 +209,8 @@ class MakeOrBuyModel:
             bounds=problem.bounds,
             method=method,
         )
+        if result.status == 2:
+            raise InfeasibleError(f"No feasible plan: {result.message}")
         if not result.success:
             raise RuntimeError(f"Optimization failed: {result.message}")
 
@@ -188,6 +247,12 @@ class MakeOrBuyModel:
         if number < 0:
             raise ValueError(f"{name} must be non-negative")
         return number
+
+    @staticmethod
+    def _capacity(value: float | None, name: str) -> float | None:
+        if value is None:
+            return None
+        return MakeOrBuyModel._non_negative(value, name)
 
     @staticmethod
     def _positive(value: float, name: str) -> float:

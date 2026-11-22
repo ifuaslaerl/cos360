@@ -8,22 +8,41 @@ Trabalho desenvolvido para a disciplina de **Otimização (COS360/COM361 - PESC/
 - **`Sintese.ipynb`**: Contém o Jupyter Notebook principal com a modelagem detalhada e a resolução computacional.
 - **`src/engine.py`**: classe `MakeOrBuyModel`, que monta e resolve o PL.
 - **`src/plots.py`**: gráficos do grafo e da função objetivo.
+- **`src/instances.py`**: gerador de instâncias aleatórias (`random_model`).
 - **`src/benchmark.py`, `src/solver_backends.py`, `src/plot_benchmark.py`, `src/analyze_benchmark.py`**: comparação de tempo e memória entre solvers (material complementar).
 ---
 ## Exemplo de Uso
 ```python
-from src.engine import MakeOrBuyModel
+from src.engine import InfeasibleError, MakeOrBuyModel
 model = MakeOrBuyModel()
-model.add_item("etileno", inventory=20, purchase_cost=3.0, production_cost=0.8)
-model.add_item("propileno", purchase_cost=4.0, production_cost=1.0)
-model.add_item("solvente", purchase_cost=9.0, production_cost=2.0)
-model.add_item("polimero", demand=100, purchase_cost=30.0, production_cost=3.0)
+model.add_item("etileno", inventory=60, purchase_cost=2.0, production_cost=2.5)
+model.add_item("propileno", purchase_cost=3.0, production_cost=1.5)
+model.add_item("solvente", demand=20, purchase_cost=2.5, production_cost=1.0)
+model.add_item("aditivo", demand=40, purchase_cost=2.5, production_cost=1.0)
+model.add_item("polimero", demand=100, purchase_cost=12.0, production_cost=3.0)
 model.add_recipe("etileno", "solvente", 0.6)
 model.add_recipe("propileno", "solvente", 0.5)
+model.add_recipe("etileno", "aditivo", 0.3)
+model.add_recipe("propileno", "aditivo", 0.8)
 model.add_recipe("solvente", "polimero", 0.7)
 model.add_recipe("etileno", "polimero", 0.4)
-print(model.solve().total_cost)  # 524.6
+print(model.solve().total_cost)
+
+model.set_production_capacity("polimero", 60)
+print(model.solve().total_cost)
+
+model.set_purchase_capacity("polimero", 30)
+try:
+    model.solve()
+except InfeasibleError:
+    print("sem plano viável")
 ```
+Para sortear instâncias com itens `p1, ..., pN` (receitas, demandas, estoques, custos e capacidades de produção aleatórios, com semente para reprodução):
+```python
+from src.instances import random_model
+model = random_model(n_items=10, seed=1)
+```
+Os gráficos são funções de `src/plots.py` que recebem o modelo: `plot_graph`, `plot_cost_breakdown`, `plot_sensitivity` (demanda, estoque, custos ou capacidades), `plot_demand_sensitivity` e `plot_feasible_region`. Eles são exibidos na tela e não são salvos em arquivo.
 ---
 ## Como Executar
 1. Clone o repositório:
