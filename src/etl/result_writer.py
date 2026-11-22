@@ -48,9 +48,8 @@ class ResultWriter:
                         **row,
                     }
                 )
-        error_path = None
+        error_path = self.output_dir / f"{stem}__errors.csv"
         if solution.errors:
-            error_path = self.output_dir / f"{stem}__errors.csv"
             with error_path.open("w", newline="", encoding="utf-8") as file:
                 writer = csv.DictWriter(file, fieldnames=("Dataset", "Solver", "Erro"))
                 writer.writeheader()
@@ -62,7 +61,10 @@ class ResultWriter:
                     }
                     for error in solution.errors
                 )
-        return result_path, error_path
+            return result_path, error_path
+        if error_path.exists():
+            error_path.unlink()
+        return result_path, None
 
     @staticmethod
     def _safe_name(value: str) -> str:

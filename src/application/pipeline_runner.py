@@ -44,11 +44,72 @@ class PipelineRunner:
         parser.add_argument(
             "--demand-file",
             type=Path,
-            default=Path("Datasets/Satisfactory/demand.example.json"),
+            default=Path("Datasets/Satisfactory/scenarios"),
+            help="JSON de demanda/estoque ou diretório com cenários Satisfactory",
         )
-        parser.add_argument("--output-dir", default="results/satisfactory")
-        parser.add_argument("--repeats", type=int, default=1)
+        parser.add_argument(
+            "--output-dir",
+            type=Path,
+            default=Path("results/satisfactory/scenarios"),
+        )
+        parser.add_argument(
+            "--repeats",
+            type=self._minimum_repeats,
+            default=10,
+            help="repetições por solver (mínimo: 10)",
+        )
         options = parser.parse_args(arguments)
+
+        if options.format == "satisfactory" and options.demand_file.is_dir():
+            demand_files = sorted(options.demand_file.rglob("scenario_*.json"))
+            if not demand_files:
+                parser.error(
+                    f"nenhum cenário scenario_*.json encontrado em {options.demand_file}"
+                )
+        else:
+            if options.format == "json" and options.demand_file.is_dir():
+                parser.error("--demand-file deve ser um arquivo no formato json")
+            demand_files = (options.demand_file,)
+
+        total_executions = 0
+        if len(demand_files) > 1:
+            executions_per_scenario = (
+                len(ScipySolverAdapter().available_solvers()) * options.repeats
+            )
+            print(
+                f"[cos360] {len(demand_files)} cenários | "
+                f"{executions_per_scenario} execuções por cenário | "
+                f"{len(demand_files) * executions_per_scenario} execuções no total"
+            )
+        for demand_file in demand_files:
+            output_dir = options.output_dir
+            if len(demand_files) > 1:
+                relative_parent = demand_file.parent.relative_to(
+                    options.demand_file
+                )
+                output_dir = output_dir / relative_parent / demand_file.stem
+                print(
+                    f"\n[cos360] Cenário {demand_file} "
+                    f"({options.repeats} repetições por solver)"
+                )
+            total_executions += self._run_pipeline(options, demand_file, output_dir)
+        if len(demand_files) > 1:
+            print(f"\n[cos360] Total executado: {total_executions} execução(ões).")
+        return 0
+
+    @staticmethod
+    def _minimum_repeats(value: str) -> int:
+        repeats = int(value)
+        if repeats < 10:
+            raise argparse.ArgumentTypeError("repeats deve ser no mínimo 10")
+        return repeats
+
+    @staticmethod
+    def _run_pipeline(
+        options: argparse.Namespace,
+        demand_file: Path,
+        output_dir: Path,
+    ) -> int:
         if options.format == "satisfactory":
             from Datasets.Satisfactory.source import SatisfactoryDocsSource
             from Datasets.Satisfactory.standardizer import (
@@ -57,8 +118,8 @@ class PipelineRunner:
 
             source = SatisfactoryDocsSource(options.dataset)
             standardizer = SatisfactoryDocsStandardizer(
-                demands=DemandConfigSource(options.demand_file).load(),
-                inventories=DemandConfigSource(options.demand_file).load_inventories(),
+                demands=DemandConfigSource(demand_file).load(),
+                inventories=DemandConfigSource(demand_file).load_inventories(),
             )
         else:
             source = JsonDatasetSource(options.dataset)
@@ -68,13 +129,14 @@ class PipelineRunner:
             standardizer,
             DatasetValidator(),
             OptimizationEngine(),
-            ResultWriter(options.output_dir),
+            ResultWriter(output_dir),
         )
-        pipeline.run(
+        solutions = pipeline.run(
             (ScipySolverAdapter(),),
             repeats=options.repeats,
+            verbose=True,
         )
-        return 0
+        return len(solutions)
 
 
 if __name__ == "__main__":
