@@ -5,11 +5,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Item:
-    """A material with demand, stock, and unit costs."""
+    """A material with demand, stock, and a unit purchase cost."""
 
     id: str
     name: str
     demand: float
     inventory: float
     purchase_cost: float
-    production_cost: float

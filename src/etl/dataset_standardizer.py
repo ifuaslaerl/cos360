@@ -31,7 +31,6 @@ class DatasetStandardizer:
                         demand=float(raw.get("demand", 0.0)),
                         inventory=float(raw.get("inventory", 0.0)),
                         purchase_cost=float(raw["purchase_cost"]),
-                        production_cost=float(raw["production_cost"]),
                     )
                 )
             except (KeyError, TypeError, ValueError) as error:
@@ -39,11 +38,17 @@ class DatasetStandardizer:
         recipes: list[Recipe] = []
         for index, raw in enumerate(raw_recipes):
             try:
+                raw_ingredients = raw["ingredients"]
+                ingredients = tuple(
+                    (str(entry["item"]), float(entry["amount"]))
+                    for entry in raw_ingredients
+                )
                 recipes.append(
                     Recipe(
-                        ingredient=str(raw["ingredient"]),
+                        id=str(raw.get("id", f"recipe_{index}")),
                         product=str(raw["product"]),
-                        amount=float(raw["amount"]),
+                        ingredients=ingredients,
+                        production_cost=float(raw.get("production_cost", 0.0)),
                     )
                 )
             except (KeyError, TypeError, ValueError) as error:

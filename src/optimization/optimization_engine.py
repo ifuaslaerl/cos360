@@ -23,21 +23,32 @@ class OptimizationEngine:
         repeat: int,
     ) -> Solution:
         try:
-            problem = self._build_problem(instance)
+            item_count = len(instance.items)
+            recipe_count = len(instance.recipes)
+            producers = self._producers_by_item(instance)
+            problem = self._build_problem(instance, producers)
 
             (objective, _solver_elapsed, values), elapsed, memory = (
                 self.monitor.measure(lambda: adapter.solve(problem, solver))
             )
-            quantities = values.reshape(len(instance.items), 3)
+            purchases = values[0:item_count]
+            stocks = values[item_count : 2 * item_count]
+            productions = values[2 * item_count : 2 * item_count + recipe_count]
             rows = tuple(
                 {
                     "Item": item.id,
-                    "Compra": float(quantities[index, 0]),
-                    "Produção": float(quantities[index, 1]),
-                    "EstoqueUtilizado": float(quantities[index, 2]),
+                    "Compra": float(purchases[index]),
+                    "Produção": float(
+                        sum(productions[recipe_index] for recipe_index in producers[item.id])
+                    ),
+                    "EstoqueUtilizado": float(stocks[index]),
                     "Custo": float(
-                        item.purchase_cost * quantities[index, 0]
-                        + item.production_cost * quantities[index, 1]
+                        item.purchase_cost * purchases[index]
+                        + sum(
+                            instance.recipes[recipe_index].production_cost
+                            * productions[recipe_index]
+                            for recipe_index in producers[item.id]
+                        )
                     ),
                 }
                 for index, item in enumerate(instance.items)
@@ -65,29 +76,45 @@ class OptimizationEngine:
                 (str(error),),
             )
 
-    def _build_problem(self, instance: ProblemInstance) -> LinearProgram:
+    @staticmethod
+    def _producers_by_item(instance: ProblemInstance) -> dict[str, list[int]]:
+        producers: dict[str, list[int]] = {item.id: [] for item in instance.items}
+        for recipe_index, recipe in enumerate(instance.recipes):
+            producers[recipe.product].append(recipe_index)
+        return producers
+
+    def _build_problem(
+        self, instance: ProblemInstance, producers: dict[str, list[int]]
+    ) -> LinearProgram:
         item_count = len(instance.items)
+        recipe_count = len(instance.recipes)
         if not item_count:
             raise ValueError("instance must contain at least one item")
         indexes = {item.id: index for index, item in enumerate(instance.items)}
-        objective = np.zeros(3 * item_count)
-        restrictions = np.zeros((item_count, 3 * item_count))
+        variable_count = 2 * item_count + recipe_count
+        objective = np.zeros(variable_count)
+        restrictions = np.zeros((item_count, variable_count))
         limits = np.zeros(item_count)
         bounds: list[tuple[float, float | None]] = []
+
         for index, item in enumerate(instance.items):
-            purchase = 3 * index
-            production = purchase + 1
-            stock = purchase + 2
+            purchase = index
+            stock = item_count + index
             objective[purchase] = item.purchase_cost
-            objective[production] = item.production_cost
             restrictions[index, purchase] = -1.0
-            restrictions[index, production] = -1.0
             restrictions[index, stock] = -1.0
             limits[index] = -item.demand
-            bounds.extend(((0.0, None), (0.0, None), (0.0, item.inventory)))
-        for recipe in instance.recipes:
-            ingredient = indexes[recipe.ingredient]
-            product = indexes[recipe.product]
-            restrictions[ingredient, 3 * product + 1] += recipe.amount
-        return LinearProgram(objective, restrictions, limits, tuple(bounds))
+            bounds.append((0.0, None))
+        for item in instance.items:
+            bounds.append((0.0, item.inventory))
 
+        for recipe_index, recipe in enumerate(instance.recipes):
+            variable = 2 * item_count + recipe_index
+            objective[variable] = recipe.production_cost
+            product = indexes[recipe.product]
+            restrictions[product, variable] += -1.0
+            for ingredient, amount in recipe.ingredients:
+                restrictions[indexes[ingredient], variable] += amount
+            bounds.append((0.0, None))
+
+        return LinearProgram(objective, restrictions, limits, tuple(bounds))

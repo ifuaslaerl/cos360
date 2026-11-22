@@ -15,23 +15,31 @@ class DatasetValidator:
             errors.append("items: duplicate ids")
         known_ids = set(item_ids)
         for item in instance.items:
-            for field in (
-                "demand",
-                "inventory",
-                "purchase_cost",
-                "production_cost",
-            ):
+            for field in ("demand", "inventory", "purchase_cost"):
                 if getattr(item, field) < 0:
                     errors.append(f"items[{item.id}].{field}: must be non-negative")
+        recipe_ids = [recipe.id for recipe in instance.recipes]
+        if len(recipe_ids) != len(set(recipe_ids)):
+            errors.append("recipes: duplicate ids")
         for index, recipe in enumerate(instance.recipes):
-            if recipe.ingredient not in known_ids:
-                errors.append(
-                    f"recipes[{index}].ingredient: unknown item {recipe.ingredient!r}"
-                )
             if recipe.product not in known_ids:
                 errors.append(
                     f"recipes[{index}].product: unknown item {recipe.product!r}"
                 )
-            if recipe.amount <= 0:
-                errors.append(f"recipes[{index}].amount: must be positive")
+            if recipe.production_cost < 0:
+                errors.append(
+                    f"recipes[{index}].production_cost: must be non-negative"
+                )
+            if not recipe.ingredients:
+                errors.append(f"recipes[{index}].ingredients: must not be empty")
+            for ingredient, amount in recipe.ingredients:
+                if ingredient not in known_ids:
+                    errors.append(
+                        f"recipes[{index}].ingredients: unknown item {ingredient!r}"
+                    )
+                if amount <= 0:
+                    errors.append(
+                        f"recipes[{index}].ingredients[{ingredient!r}]: "
+                        "amount must be positive"
+                    )
         return tuple(errors)

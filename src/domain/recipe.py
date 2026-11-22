@@ -5,8 +5,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Recipe:
-    """Quantity of an ingredient required per product unit."""
+    """One way of producing one unit of ``product`` from its ``ingredients``."""
 
-    ingredient: str
+    id: str
     product: str
-    amount: float
+    ingredients: tuple[tuple[str, float], ...]
+    production_cost: float = 0.0
